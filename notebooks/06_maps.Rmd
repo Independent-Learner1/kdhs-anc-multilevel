@@ -1,0 +1,75 @@
+---
+title: "06 Maps (static and interactive)"
+author: "Briton M Kavulavu"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5.5, dpi = 120)
+source("../R/_load.R")
+```
+
+```{r load}
+sp  <- readRDS(file.path(cfg$paths$out, "data", "spatial_results.rds"))
+fits <- readRDS(file.path(cfg$paths$out, "models", "glmm_fits.rds"))
+S <- dplyr::left_join(sp$bnd[, c("county_key", "county_boundary")], sp$res, by = "county_key")
+re <- county_random_effects(fits$full); S$re_or <- re$odds_ratio_vs_average[match(S$county_key, norm_name(re$county))]
+S$re_u <- re$u[match(S$county_key, norm_name(re$county))]
+cap <- paste0(cfg$project$survey_label, ". Design-based county estimates; dashed outline = fewer than ", cfg$analysis$small_county_n, " women.")
+```
+
+## Observed and smoothed coverage
+
+```{r m1, fig.width = 7, fig.height = 7}
+m1 <- map_choropleth(S, "pct", "Adequate ANC by county", "% (quintiles)", caption = cap); save_fig(m1, "map_01_observed", cfg, 7, 7); m1
+m2 <- map_choropleth(S, "eb_local", "Adequate ANC, empirical Bayes smoothed", "% (quintiles)", caption = cap); save_fig(m2, "map_02_eb_smoothed", cfg, 7, 7); m2
+```
+
+## Precision
+
+```{r m3, fig.width = 7, fig.height = 7}
+S$ci_width <- S$high - S$low
+m3 <- map_choropleth(S, "ci_width", "Width of the 95% confidence interval", "Percentage points", palette = "rocket", caption = cap); save_fig(m3, "map_03_precision", cfg, 7, 7); m3
+```
+
+## Spatial clusters and hot spots
+
+```{r m4, fig.width = 13, fig.height = 6}
+a <- map_categorical(S, "cluster", lisa_colours, "Local Moran's I clusters", "Cluster", caption = "Permutation p < 0.05, unadjusted")
+b <- map_categorical(S, "hotspot", hot_colours, "Getis-Ord Gi* hot and cold spots", "Gi*", caption = "p < 0.05, unadjusted")
+g <- patchwork::wrap_plots(a, b); save_fig(g, "map_04_clusters", cfg, 13, 6); g
+```
+
+## County effects after adjustment
+
+```{r m5, fig.width = 7, fig.height = 7}
+m5 <- map_diverging(S, "re_u", "County random effects (log-odds scale)", "Effect", subtitle = "Blue above, red below the average county, after adjustment for individual factors", caption = cap)
+save_fig(m5, "map_05_random_effects", cfg, 7, 7); m5
+```
+
+## County ranking
+
+```{r rank, fig.height = 9}
+p <- county_rank_plot(sp$res, overall = NULL); save_fig(p, "map_06_ranking", cfg, 7, 9); p
+```
+
+## Interactive map
+
+A layered, zoomable map with popups. It needs the `leaflet` package; if it is not installed the chunk is skipped with a message.
+
+```{r leaflet}
+layers <- list(
+  "Observed coverage (%)" = list(value = "pct", label = "Adequate ANC (%)", type = "continuous"),
+  "Smoothed coverage (%)" = list(value = "eb_local", label = "Smoothed (%)", type = "continuous"),
+  "LISA clusters" = list(value = "cluster", label = "LISA", type = "categorical", colours = lisa_colours),
+  "Gi* hot spots" = list(value = "hotspot", label = "Gi*", type = "categorical", colours = hot_colours),
+  "County effect (odds ratio)" = list(value = "re_or", label = "OR vs average", type = "continuous"))
+widget <- interactive_map(S, layers, file.path(cfg$paths$out, "maps", "interactive_county_map.html"), title = "ANC coverage by county")
+if (!is.null(widget)) widget
+```

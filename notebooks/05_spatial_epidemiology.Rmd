@@ -1,0 +1,89 @@
+---
+title: "05 Spatial epidemiology"
+author: "Briton M Kavulavu"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5.5, dpi = 120)
+source("../R/_load.R")
+```
+
+County-level estimates, spatial weights, global and local spatial autocorrelation, hot spots, empirical Bayes smoothing and an exploratory spatial regression. County estimates are design-based; counties with fewer women than `analysis.small_county_n` are flagged as imprecise.
+
+```{r load}
+df <- readRDS(file.path(cfg$paths$out, "data", "analysis_data.rds"))
+bnd <- read_boundaries(cfg); bnd <- match_boundaries(bnd, unique(df$county[df$in_sample]), cfg)
+est <- county_estimates(df, cfg)
+bnd <- bnd[match(est$county_key, bnd$county_key), ]       # same order as the estimates
+nbs <- build_neighbours(bnd, cfg); nsim <- cfg$spatial$permutations
+save_table(est, "05_county_estimates", cfg)
+knitr::kable(head(est[order(-est$pct), c("county", "n", "pct", "low", "high", "small_n")], 10), digits = 1, caption = "Highest ten counties")
+```
+
+## Neighbourhood structure
+
+```{r nb}
+summary(spdep::card(nbs$nb))
+```
+
+## Global Moran's I
+
+```{r moran}
+gm <- global_moran(est$pct, nbs$lw, nsim, cfg$project$seed); save_table(gm, "05_global_moran", cfg); knitr::kable(gm, digits = 4)
+```
+
+## Local Moran's I (LISA) and Getis-Ord Gi*
+
+```{r lisa}
+lisa <- local_moran(est$pct, nbs$lw, nsim, cfg$spatial$lisa_alpha, cfg$project$seed)
+gi   <- getis_ord(est$pct, nbs$nb, cfg$spatial$lisa_alpha)
+res  <- bind_cols(est, lisa, gi); save_table(res, "05_lisa_gistar", cfg)
+knitr::kable(table(LISA = lisa$cluster, `Gi*` = gi$hotspot))
+```
+
+Cluster labels use the unadjusted permutation p value. The columns `cluster_fdr` and `hotspot_fdr` apply a false discovery rate correction for the 47 simultaneous tests and are the conservative reading.
+
+## Empirical Bayes smoothing
+
+Small counties have unstable raw estimates. The smoothed values shrink them toward the national (global) or neighbourhood (local) mean.
+
+```{r eb}
+eb <- eb_smooth(est$pct / 100, est$n, nbs$nb); res <- bind_cols(res, eb); save_table(res, "05_county_spatial_results", cfg)
+knitr::kable(head(res[order(res$n), c("county", "n", "pct", "eb_global", "eb_local")], 8), digits = 1)
+```
+
+## Do county effects cluster after adjustment?
+
+Moran's I of the multilevel county random effects tells whether geography still carries signal once individual factors are removed.
+
+```{r remoran}
+fits <- readRDS(file.path(cfg$paths$out, "models", "glmm_fits.rds"))
+re <- county_random_effects(fits$full)
+rm <- re_moran(re, bnd, nbs$lw, nsim, cfg$project$seed); save_table(rm, "05_random_effect_moran", cfg); knitr::kable(rm, digits = 4)
+```
+
+## Exploratory county-level spatial regression
+
+This ecological model relates county coverage to county context. It describes areas, not women, and with 47 counties it is exploratory.
+
+```{r sreg}
+ctx <- county_context(df, cfg)
+d2 <- merge(est, ctx, by = c("county", "county_key")); d2 <- d2[match(bnd$county_key, d2$county_key), ]
+sr <- spatial_regression(d2, nbs$lw, "pct", vapply(cfg$spatial$contextual, function(s) s$name, ""))
+save_table(sr$compare, "05_spatial_model_comparison", cfg); save_table(sr$lm_tests, "05_lm_tests", cfg)
+knitr::kable(sr$compare, digits = 3); knitr::kable(sr$lm_tests, digits = 4); knitr::kable(sr$resid_moran, digits = 4)
+summary(sr$ols)
+```
+
+Read the Lagrange multiplier tests in the usual order: if only the lag test is significant, choose the lag model; if only the error test, the error model; if both, use the robust versions. If neither is significant, the ordinary least squares model is adequate.
+
+```{r save}
+saveRDS(list(bnd = bnd, res = res), file.path(cfg$paths$out, "data", "spatial_results.rds"))
+```

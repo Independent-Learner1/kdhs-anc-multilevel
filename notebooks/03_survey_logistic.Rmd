@@ -1,0 +1,67 @@
+---
+title: "03 Survey-weighted logistic regression"
+author: "Briton M Kavulavu"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5.5, dpi = 120)
+source("../R/_load.R")
+```
+
+Model 1 is a design-based logistic regression (`survey::svyglm`, quasibinomial), with confidence intervals from the t distribution on the design degrees of freedom.
+
+```{r fit}
+df <- readRDS(file.path(cfg$paths$out, "data", "analysis_data.rds"))
+fm <- model_formula(cfg); m1 <- fit_survey_logit(df, fm)
+or1 <- label_terms(tidy_or(m1$fit, m1$design, cfg$analysis$conf_level), cfg$analysis$covariates)
+or1 <- or1[!is.na(or1$variable), ]; save_table(or1, "03_model1_adjusted_or", cfg)
+knitr::kable(or1[, c("variable", "category", "or", "ci_low", "ci_high", "p_value")], digits = 3)
+```
+
+## Forest plot
+
+```{r forest, fig.height = 8}
+p <- forest_plot(or1, "Model 1: adjusted odds ratios of adequate ANC"); save_fig(p, "03_forest_model1", cfg, 8, 8); p
+```
+
+## Fit, discrimination and collinearity
+
+```{r diagnostics}
+y <- m1$data$adequate_anc; pr <- as.numeric(predict(m1$fit, type = "response")); w <- m1$data$wt
+hl <- hosmer_lemeshow(y, pr, w); auc <- model_auc(y, pr)
+fit_stats <- data.frame(n = nrow(m1$data), nagelkerke_r2 = nagelkerke_r2(fm, m1$data), hl_chisq = hl$chisq, hl_p = hl$p_value, auc = auc$auc)
+save_table(fit_stats, "03_fit_statistics", cfg); knitr::kable(fit_stats, digits = 3)
+vif <- vif_table(fm, m1$data); save_table(vif, "03_vif", cfg); knitr::kable(vif, digits = 2)
+```
+
+The Hosmer and Lemeshow test here forms ten groups of equal total weight. SPSS forms its groups differently, so the p value can differ slightly between the two programs; the conclusion on calibration should not.
+
+```{r calib}
+p <- calibration_plot(y, pr, w); save_fig(p, "03_calibration", cfg, 5, 5); p
+```
+
+## Standardised predicted probabilities
+
+```{r margins}
+sp <- bind_rows(lapply(c("education", "wealth", "residence", "parity"), function(v) standardised_predictions(m1$fit, m1$data, v)))
+save_table(sp, "03_standardised_predictions", cfg); knitr::kable(sp, digits = 1)
+```
+
+## Optimal ANC (eight or more visits) and early booking
+
+```{r secondary}
+m_opt <- fit_survey_logit(df, model_formula(cfg, "optimal_anc"))
+or_opt <- label_terms(tidy_or(m_opt$fit, m_opt$design), cfg$analysis$covariates); or_opt <- or_opt[!is.na(or_opt$variable), ]
+save_table(or_opt, "03_optimal_anc_or", cfg); knitr::kable(or_opt[, c("variable", "category", "or", "ci_low", "ci_high", "p_value")], digits = 3)
+dt <- df[df$in_timing_sample, ]
+m_tim <- fit_survey_logit(dt, model_formula(cfg, "adequate_anc", extra = "early_booking"), subset_col = "in_timing_sample")
+or_t <- tidy_or(m_tim$fit, m_tim$design); save_table(or_t, "03_timing_model_or", cfg)
+knitr::kable(or_t[grepl("early", or_t$term), ], digits = 3)
+```

@@ -1,0 +1,70 @@
+---
+title: "04 Multilevel models"
+author: "Briton M Kavulavu"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5.5, dpi = 120)
+source("../R/_load.R")
+```
+
+Two-level random-intercept logistic models, women within counties. The sampling weights are **not** used here by default (see the README for the reason). The model is fitted by maximum likelihood with adaptive Gauss-Hermite quadrature (`lme4::glmer`, `nAGQ` from the config).
+
+```{r fit}
+df <- readRDS(file.path(cfg$paths$out, "data", "analysis_data.rds"))
+d <- df[df$in_sample, ]; fm <- model_formula(cfg)
+fit0 <- fit_glmm(adequate_anc ~ 1, d, cfg); fit1 <- fit_glmm(fm, d, cfg)
+saveRDS(list(null = fit0, full = fit1), file.path(cfg$paths$out, "models", "glmm_fits.rds"))
+```
+
+## Variance partition (Table 5 style)
+
+```{r variance}
+v0 <- variance_measures(fit0); v1 <- variance_measures(fit1); lr <- lrt_random_intercept(fit0, d)
+var_tab <- data.frame(measure = c("County variance", "ICC (%)", "Median odds ratio", "PCV (%)", "LR chi-square (p halved)"),
+  null = c(v0$tau2, v0$icc_pct, v0$mor, NA, lr$chisq), full = c(v1$tau2, v1$icc_pct, v1$mor, pcv(fit0, fit1), NA))
+save_table(var_tab, "04_variance_measures", cfg); knitr::kable(var_tab, digits = 3)
+lr
+```
+
+## Quadrature check
+
+A random-intercept variance estimated with too few quadrature points can be wrong. The variance should be stable as the number of points rises.
+
+```{r quad}
+chk <- lapply(c(1, 5, 10, 25), function(k) {
+  f <- lme4::glmer(adequate_anc ~ 1 + (1 | county), d, family = binomial, nAGQ = k, control = lme4::glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5)))
+  data.frame(nAGQ = k, tau2 = as.numeric(lme4::VarCorr(f)[[1]]), logLik = as.numeric(logLik(f)))
+})
+quad <- bind_rows(chk); save_table(quad, "04_quadrature_check", cfg); knitr::kable(quad, digits = 4)
+```
+
+## Fixed effects
+
+```{r fixed}
+or2 <- label_terms(glmm_or(fit1, cfg$analysis$conf_level), cfg$analysis$covariates); or2 <- or2[!is.na(or2$variable), ]
+save_table(or2, "04_model2_adjusted_or", cfg); knitr::kable(or2[, c("variable", "category", "or", "ci_low", "ci_high", "p_value")], digits = 3)
+```
+
+## County effects
+
+```{r re, fig.height = 9}
+re <- county_random_effects(fit1); save_table(re, "04_county_random_effects", cfg)
+p <- caterpillar_plot(re); save_fig(p, "04_caterpillar", cfg, 7, 9); p
+```
+
+## Optional: weighted multilevel sensitivity
+
+Set `multilevel.use_weights: true` only for a sensitivity analysis. `lme4` treats weights as case weights, so the estimates are not design-consistent; the survey-weighted model in notebook 03 remains the primary population-level estimate.
+
+```{r wt, eval = isTRUE(cfg$multilevel$use_weights)}
+fit_w <- lme4::glmer(update(fm, . ~ . + (1 | county)), d, family = binomial, weights = wt / mean(wt), nAGQ = 1)
+summary(fit_w)$varcor
+```

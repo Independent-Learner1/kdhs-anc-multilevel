@@ -1,0 +1,59 @@
+---
+title: "01 Data preparation and sample flow"
+author: "Briton M Kavulavu"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5.5, dpi = 120)
+source("../R/_load.R")
+```
+
+This notebook reads the DHS Women's Individual Recode (IR) file, builds the analysis variables defined in `R/data_prep.R`, documents the sample flow and the missing data, and saves the analysis dataset for the other notebooks. All variable names come from `config/config.yml`, so a different KDHS round only needs a new configuration file.
+
+```{r read}
+raw <- read_dhs_ir(cfg$paths$data, config_vars(cfg))
+df  <- build_analysis_data(raw, cfg)
+saveRDS(df, file.path(cfg$paths$out, "data", "analysis_data.rds"))
+dim(raw)
+```
+
+## Sample flow (STROBE item 13)
+
+```{r flow}
+flow <- sample_flow(df); save_table(flow, "01_sample_flow", cfg)
+knitr::kable(flow, digits = 0, format.args = list(big.mark = ","))
+```
+
+## Missing data
+
+Structural missingness (for example, decision-making is not asked of women outside a union) is kept as an explicit category, so it is shown separately from true missing values.
+
+```{r missing}
+miss <- missingness_table(df, cfg); save_table(miss, "01_missingness", cfg)
+knitr::kable(miss)
+```
+
+## Outcomes
+
+```{r outcomes}
+prev <- overall_prevalence(df, cfg); save_table(prev, "01_overall_prevalence", cfg)
+knitr::kable(prev, digits = 2)
+```
+
+## Sample characteristics
+
+```{r table1}
+t1 <- sample_characteristics(df, c(cfg$analysis$covariates, "timing")); save_table(t1, "01_sample_characteristics", cfg)
+knitr::kable(t1, digits = 1, format.args = list(big.mark = ","))
+```
+
+```{r session}
+sessionInfo()
+```

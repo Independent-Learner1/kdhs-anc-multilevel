@@ -1,0 +1,19 @@
+# DHS microdata and derived individual-level files must never be committed
+data/raw/*
+!data/raw/.gitkeep
+data/boundaries/*.geojson
+data/boundaries/*.shp
+data/boundaries/*.gpkg
+data/boundaries/*.dbf
+data/boundaries/*.shx
+data/boundaries/*.prj
+*.sav
+*.dta
+*.rds
+outputs/
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*_files/
+.DS_Store

@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below."
+title: "kdhs-anc-multilevel: survey-weighted, multilevel and spatial analysis of antenatal care in the Kenya Demographic and Health Survey"
+type: software
+authors:
+  - family-names: Kavulavu
+    given-names: Briton M
+license: MIT
+repository-code: "https://github.com/REPLACE-WITH-YOUR-USERNAME/kdhs-anc-multilevel"
+date-released: "2026-10-30"

@@ -1,0 +1,58 @@
+---
+title: "02 Descriptive and bivariate analysis"
+author: "Briton M Kavulavu"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5.5, dpi = 120)
+source("../R/_load.R")
+```
+
+Design-based (weighted, stratified, clustered) percentages with logit confidence intervals, crude odds ratios and Cramer's V for each covariate against adequate antenatal care (ANC).
+
+```{r load}
+df <- readRDS(file.path(cfg$paths$out, "data", "analysis_data.rds"))
+d  <- df[df$in_sample, ]; des <- make_design(d)
+```
+
+## Bivariate table
+
+```{r bivar}
+bt <- bivariate_table(df, cfg); save_table(bt, "02_bivariate", cfg)
+knitr::kable(bt, digits = 2, format.args = list(big.mark = ","))
+```
+
+## Gradients
+
+```{r gradients, fig.width = 10, fig.height = 4}
+pe <- prevalence_by(des, "adequate_anc", "education"); pw <- prevalence_by(des, "adequate_anc", "wealth")
+pe$category <- factor(pe$category, levels(d$education)); pw$category <- factor(pw$category, levels(d$wealth))
+g <- patchwork::wrap_plots(gradient_plot(pe[order(pe$category), ], "Education"), gradient_plot(pw[order(pw$category), ], "Wealth quintile"))
+save_fig(g, "02_gradients", cfg, 10, 4); g
+```
+
+## Timing of the first visit
+
+The timing sample includes women with at least one visit and a recorded first-visit month.
+
+```{r timing}
+dt <- df[df$in_timing_sample, ]; dest <- make_design(dt)
+tm <- prevalence_by(dest, "adequate_anc", "timing"); save_table(tm, "02_timing", cfg); knitr::kable(tm, digits = 1)
+```
+
+## Inequality in adequate ANC by wealth
+
+```{r ineq}
+sii <- inequality_indices(des, "adequate_anc", "wealth")
+ci  <- bootstrap_concentration(df, "adequate_anc", "wealth", B = 500, seed = cfg$project$seed)
+save_table(sii, "02_sii_rii", cfg); save_table(ci, "02_concentration_index", cfg)
+knitr::kable(sii, digits = 2); knitr::kable(ci, digits = 3)
+p <- concentration_curve(df); save_fig(p, "02_concentration_curve", cfg, 5, 5); p
+```

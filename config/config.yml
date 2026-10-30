@@ -1,0 +1,83 @@
+# ------------------------------------------------------------------------------
+# Configuration for the KDHS antenatal care (ANC) multilevel pipeline.
+#
+# To run the pipeline on a different KDHS round (or another DHS survey), copy
+# this file, change the entries marked CHANGE, and point the notebooks to it with
+#   Sys.setenv(KDHS_CONFIG = "config/config_kdhs2014.yml")
+# Variable names are the lower-case DHS recode names. Names such as M14$1 in the
+# SPSS file are read as m14_1.
+# ------------------------------------------------------------------------------
+
+project:
+  title: "Determinants of antenatal care utilisation in Kenya"       # CHANGE
+  survey_label: "2022 KDHS"                                         # CHANGE
+  country: "Kenya"                                                  # CHANGE
+  author: "Briton M Kavulavu"
+  seed: 2022
+
+paths:
+  # The DHS Women's Individual Recode (IR) file. DHS data cannot be shared, so the
+  # file is NOT part of the repository. Put it in data/raw/ (it is git-ignored).
+  data_file: "data/raw/KEIR8CFL.SAV"                                # CHANGE
+  # County (or region) boundaries. See data/boundaries/README.md. Use null to try
+  # downloading GADM level 1 through the 'geodata' package (needs internet).
+  boundaries_file: "data/boundaries/kenya_counties.geojson"         # CHANGE
+  output_dir: "outputs"
+
+# DHS recode variables (lower case). Change only if your round uses other names.
+variables:
+  weight: v005          # sampling weight, divided by 1,000,000 inside the code
+  psu: v021             # primary sampling unit (cluster)
+  strata: v023          # sample stratum
+  geography: v024       # county (KDHS 2014 and 2022); province or region in older rounds
+  residence: v025       # 1 urban, 2 rural
+  age: v012             # age in completed years
+  education: v106       # 0 none, 1 primary, 2 secondary, 3 higher
+  wealth: v190          # wealth quintile, 1 poorest to 5 richest
+  parity: v201          # children ever born
+  marital: v502         # 1 currently in union
+  decision: v743a       # who decides on the woman's own health care
+  distance: v467d       # distance to facility a big problem (1 yes, 2 no)
+  media: [v157, v158, v159]   # newspaper, radio, television (>= 2 means weekly)
+  internet: v171a       # internet use (0 never)
+  months_since_birth: v222    # months since last birth (DHS-8); see README for older rounds
+  anc_visits: m14_1     # number of ANC visits, most recent birth
+  anc_first_month: m13_1      # month of pregnancy at first ANC visit
+
+analysis:
+  recent_birth_months_max: 35    # 35 means births in the last 36 months (v222 <= 35)
+  adequate_threshold: 4          # primary outcome: four or more visits
+  optimal_threshold: 8           # secondary outcome: WHO 2016, eight or more contacts
+  early_booking_month: 3         # first visit at three months of pregnancy or earlier
+  small_county_n: 150            # counties with fewer women are flagged as imprecise
+  conf_level: 0.95
+  # Covariates, in model order (names created in R/data_prep.R).
+  covariates: [age_group, education, wealth, residence, parity, decision, distance, media_weekly, internet_use]
+  # Optional extra DHS variables are NOT needed; add new derived variables in data_prep.R.
+
+multilevel:
+  nAGQ: 10              # adaptive Gauss-Hermite points for glmer (random intercept only)
+  # Sampling weights are NOT used in the multilevel model by default. lme4 treats
+  # weights as case weights, which is not valid for survey weights. See README.
+  use_weights: false
+
+spatial:
+  weights_type: "queen"       # "queen" contiguity or "knn"
+  knn: 5                      # used when weights_type is "knn" or when a county has no neighbour
+  permutations: 9999          # Monte Carlo permutations for Moran's I
+  lisa_alpha: 0.05
+  boundary_name_field: "county"   # attribute with the county name inside the boundary file
+  # Optional spelling fixes when the boundary file and the DHS value labels use
+  # different names. Names are compared after lower-casing and removing spaces,
+  # hyphens, apostrophes and the word "county", so most spellings already match.
+  # Format: "normalised boundary name": "normalised DHS name".
+  name_aliases:
+    nairobicity: nairobi
+  # County-level context for the exploratory spatial regression. Each entry is the
+  # weighted share of women in the listed levels of a covariate (level names are the
+  # labels created in R/data_prep.R). Edit or extend freely.
+  contextual:
+    - {name: pct_secondary_plus, var: education, levels: [Secondary, Higher]}
+    - {name: pct_richer_quintiles, var: wealth, levels: [Richer, Richest]}
+    - {name: pct_urban, var: residence, levels: [Urban]}
+    - {name: pct_four_plus_children, var: parity, levels: [Four or more]}

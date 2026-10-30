@@ -1,0 +1,82 @@
+---
+title: "07 Sensitivity analyses and checks"
+author: "Briton M Kavulavu"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5.5, dpi = 120)
+source("../R/_load.R")
+```
+
+```{r load}
+df <- readRDS(file.path(cfg$paths$out, "data", "analysis_data.rds"))
+fm <- model_formula(cfg); m1 <- fit_survey_logit(df, fm); or1 <- label_terms(tidy_or(m1$fit, m1$design), cfg$analysis$covariates)
+```
+
+## 1. Complete-case analysis
+
+Structural categories ("not asked") are kept in the primary model. The complete-case run drops them.
+
+```{r cc}
+cc <- df[df$complete_case, ]; mcc <- fit_survey_logit(cc, fm)
+orcc <- label_terms(tidy_or(mcc$fit, mcc$design), cfg$analysis$covariates)
+cmp <- merge(or1[, c("term", "or")], orcc[, c("term", "or", "ci_low", "ci_high")], by = "term", suffixes = c("_primary", "_complete_case"))
+save_table(cmp, "07_complete_case", cfg); knitr::kable(cmp, digits = 2)
+```
+
+## 2. Alternative adequacy thresholds
+
+```{r thr}
+d <- df[df$in_sample, ]
+thr <- lapply(c(3, 4, 5, 6, 8), function(k) { d$y <- as.numeric(d$anc_visits >= k); dd <- d; dd$adequate_anc <- dd$y
+  m <- fit_survey_logit(dd, fm); o <- label_terms(tidy_or(m$fit, m$design), cfg$analysis$covariates); o$threshold <- k; o })
+thr <- bind_rows(thr); thr <- thr[!is.na(thr$variable), ]; save_table(thr, "07_thresholds", cfg)
+knitr::kable(thr[thr$variable %in% c("Education", "Wealth quintile") & grepl("Higher|Richest", thr$category), c("threshold", "variable", "category", "or", "ci_low", "ci_high")], digits = 2)
+```
+
+## 3. Influence of the largest counties and of single counties
+
+Leave-one-county-out estimates of the education and wealth odds ratios show whether a single county drives the result.
+
+```{r loo}
+cn <- sort(unique(as.character(d$county)))
+loo <- bind_rows(lapply(cn, function(k) { dd <- d[as.character(d$county) != k, ]; m <- fit_survey_logit(dd, fm)
+  o <- tidy_or(m$fit, m$design); o$dropped <- k; o[o$term %in% c("educationHigher", "wealthRichest"), ] }))
+save_table(loo, "07_leave_one_county_out", cfg)
+rng <- loo |> group_by(term) |> summarise(min_or = min(or), max_or = max(or), full_or = or1$or[match(first(term), or1$term)])
+knitr::kable(rng, digits = 2)
+```
+
+## 4. Weighted versus unweighted logistic regression
+
+```{r unw}
+mu <- glm(fm, data = m1$data, family = binomial); ouw <- label_terms(data.frame(term = names(coef(mu)), or_unweighted = exp(coef(mu))), cfg$analysis$covariates)
+cmp2 <- merge(or1[, c("term", "or")], ouw[, c("term", "or_unweighted")], by = "term"); save_table(cmp2, "07_weighted_vs_unweighted", cfg); knitr::kable(cmp2, digits = 2)
+```
+
+## 5. Design effects
+
+```{r deff}
+ds <- subset(make_design(d), TRUE)
+de <- survey::svymean(~adequate_anc, ds, deff = "replace"); deff <- data.frame(estimate = coef(de), se = survey::SE(de), deff = survey::deff(de))
+save_table(deff, "07_design_effect", cfg); knitr::kable(deff, digits = 3)
+```
+
+## 6. Residual spatial dependence in the survey-weighted model
+
+```{r resid_moran}
+if (file.exists(cfg$paths$boundaries)) {
+  sp <- readRDS(file.path(cfg$paths$out, "data", "spatial_results.rds"))
+  dm <- m1$data; dm$res <- residuals(glm(fm, data = dm, family = binomial), type = "response")
+  cr <- dm |> group_by(county_key = norm_name(county)) |> summarise(r = mean(res))
+  nb <- build_neighbours(sp$bnd, cfg); r <- cr$r[match(sp$bnd$county_key, cr$county_key)]
+  knitr::kable(global_moran(r, nb$lw, cfg$spatial$permutations, cfg$project$seed), digits = 4)
+}
+```
